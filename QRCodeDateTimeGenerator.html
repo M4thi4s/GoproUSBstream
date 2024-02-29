@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>QR Code Générateur en Temps Réel</title>
+    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
+</head>
+<body>
+    <div id="qrcode"></div>
+    <p id="currentDateTime"></p>
+    <script>
+        function getCurrentDateTime() {
+            return new Date().toISOString();
+        }
+
+        function updateQRCode() {
+            const currentDateTime = getCurrentDateTime();
+            document.getElementById('currentDateTime').innerText = currentDateTime;
+
+            const qrcodeContainer = document.getElementById("qrcode");
+            qrcodeContainer.innerHTML = '';
+
+            new QRCode(qrcodeContainer, currentDateTime);
+        }
+
+        setInterval(updateQRCode, 100); // Mettre à jour toutes les 100 millisecondes
+    </script>
+</body>
+</html>
