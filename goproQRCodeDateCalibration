@@ -10,36 +10,30 @@ from fractions import Fraction
 from pyzbar import pyzbar
 import re
 import pandas as pd
-from multiprocessing import Pool
+from datetime import datetime, timedelta
+import warnings
 
-"""
-ID 	FOV 	Supported Cameras
-0 	Wide 	Hero 12 Black, Hero 9 Black, Hero 10 Black, Hero 11 Black
-2 	Narrow 	Hero 12 Black, Hero 9 Black, Hero 10 Black, Hero 11 Black
-3 	Superview 	Hero 12 Black, Hero 9 Black, Hero 10 Black, Hero 11 Black
-4 	Linear 	Hero 12 Black, Hero 9 Black, Hero 10 Black, Hero 11 Black
-"""
-fov = 0
-"""
-ID 	Resolution 	Supported Cameras
-4 	480p 	Hero 10 Black, Hero 9 Black
-7 	720p 	Hero 12 Black, Hero 9 Black, Hero 10 Black, Hero 11 Black
-12 	1080p 	Hero 12 Black, Hero 9 Black, Hero 10 Black, Hero 11 Black
-"""
-resolution = 7
-width_resolution = 1280
-height_resolution = 720
+# Ignorer les avertissements spécifiques par leur message texte
+# warnings.filterwarnings("ignore", message="deprecated pixel format used")
+# warnings.filterwarnings("ignore", message="illegal short term buffer state detected")
 
+# Paramètres de la caméra GoPro
+FOV = 0  # Field of View
+RESOLUTION = 7  # ID de la résolution (720p)
+WIDTH_RESOLUTION = 1280
+HEIGHT_RESOLUTION = 720
 
-timeToStream = 30  # 6 minutes
-filmDuration = 10  # 2 minutes
-last_qr_code_time = None  # Heure du dernier QR Code détecté
-last_qr_code_tps = None  # TPS du dernier QR Code détecté
+# Paramètres de streaming
+NUMBER_OF_STREAMS = 3
+STREAM_DURATION = 30  # Durée de chaque flux en secondes
 
+# Variables de contrôle
+last_qr_code_time = None
+last_qr_code_tps = None
 stop_stream = False
 
+# Fonctions
 def get_gopro_ip_addresses():
-    print("Getting GoPro IP addresses...")
     gopro_ip_addresses = []
     for interface, addrs in psutil.net_if_addrs().items():
         if interface.startswith('usb'):
@@ -47,263 +41,142 @@ def get_gopro_ip_addresses():
                 if addr.family == socket.AF_INET:
                     ip_parts = addr.address.split('.')
                     ip_parts[-1] = '51'
-                    modified_ip = '.'.join(ip_parts)
-                    gopro_ip_addresses.append(modified_ip)
+                    gopro_ip_addresses.append('.'.join(ip_parts))
     return gopro_ip_addresses
 
 def send_gopro_request(ip, path, params, timeout=10):
     response = requests.get(f"http://{ip}/gp/{path}", params=params, timeout=timeout)
-    if response.status_code == 200:
-        data = response.json()
-        if data.get("error") != 0:
-            print(f"Error with GoPro at {ip}: {data.get('error')}")
-            return False
-    else:
-        print(f"Failed to connect to GoPro at {ip}, status code: {response.status_code}")
+    if response.status_code != 200 or response.json().get("error") != 0:
         return False
     return True
 
-def start_and_set_gopro_resolutionand_fov(ip, resolution, fov):
-    print (f"Starting GoPro at {ip} and setting resolution to {resolution} and fov to {fov}")
-    return send_gopro_request(ip, 'gpWebcam/START', {'res': resolution, 'fov': fov})
+def start_and_set_gopro_resolutionand_fov(ip):
+    return send_gopro_request(ip, 'gpWebcam/START', {'res': RESOLUTION, 'fov': FOV})
 
 def stop_gopro(ip):
-    print (f"Stopping GoPro at {ip}")
     random_sleep_time = random.randint(1, 5)
     time.sleep(random_sleep_time)
     return send_gopro_request(ip, 'gpWebcam/STOP', {})
 
 def stop_all_gopro(gopro_ip_addresses):
-    print ("Stopping all GoPro cameras")
     for gopro_ip in gopro_ip_addresses:
         if stop_gopro(gopro_ip):
             time.sleep(3)
-        else:
-            print(f"Failed to stop GoPro at {gopro_ip}")
-
-"""
-def capture_image(ip, output_file):
-    stream_url = f'udp://{ip}:8554?overrun_nonfatal=1&fifo_size=50000000'
-    try:
-        print (f"Capturing image from {ip}")
-        container = av.open(stream_url, options={'analyzeduration': '5000000', 'probesize': '5000000'})
-        for frame in container.decode(video=0):
-            img = frame.to_image()
-            img.save(output_file)
-            break
-        print (f"Image saved to {output_file}")
-        container.close()
-    except av.AVError as e:
-        print(f"AVError occurred: {e}")
-        return False
-    return True
-"""
 
 def decode_qr_code(image):
     decoded_objects = pyzbar.decode(image)
-
     for obj in decoded_objects:
         qr_data = obj.data.decode('utf-8')
         if re.match(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z', qr_data):
-            return qr_data
+            return datetime.strptime(qr_data, '%Y-%m-%dT%H:%M:%S.%fZ')
     return None
 
 def add_to_spreadsheet(output_video_file_name, frame_tps, real_time):
     file_path = 'tps_data.csv'
     df = pd.DataFrame([[output_video_file_name, frame_tps, real_time]], columns=['Video file name', 'TPS value', 'Datetime'])
-
     header = not pd.io.common.file_exists(file_path)
     df.to_csv(file_path, mode='a', index=False, header=header)
 
 def wait_for_initial_qr_code():
-    global last_qr_code_time
-    global last_qr_code_tps
-
-    print("En attente du QR Code pour commencer l'enregistrement...")
-
-    # Ouvrir le flux vidéo pour détecter le QR Code
+    global last_qr_code_time, last_qr_code_tps
+    fifo_size = int(WIDTH_RESOLUTION * HEIGHT_RESOLUTION * 1.5 * 3)
     ip = get_gopro_ip_addresses()[0]
-    stream_url = f'udp://{ip}:8554?overrun_nonfatal=1&fifo_size=50000000'
+    stream_url = f'udp://{ip}:8554?overrun_nonfatal=1&fifo_size={fifo_size}'
 
     while not last_qr_code_time:
-        print("Getting last frame")
-        frame = None
-
-        with av.open(stream_url) as input_container:
-            for packet in input_container.demux():
+        with av.open(stream_url, options={'analyzeduration': '500000', 'probesize': '500000'}) as input_container:
+            found_frame = False
+            while not found_frame:
+                packet = next(input_container.demux(), None)
+                if packet is None:
+                    break
                 for frame in packet.decode():
                     if isinstance(frame, av.VideoFrame):
+                        found_frame = True
                         break
-                if frame and isinstance(frame, av.VideoFrame):
+                if found_frame:
                     break
 
-        # Vérifier si un frame vidéo a été obtenu
-        if frame is None or not isinstance(frame, av.VideoFrame):
+        if not found_frame:
             continue
 
-        print("PTS 1 : {0:.1f}".format(float(frame.pts*frame.time_base)))
-
-        # Traiter la dernière frame reçue
-        img = frame.to_image()
-        img_cv = np.array(img)
-        img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
-
-        # Détecter le QR Code
-        qr_code_time = decode_qr_code(img_cv)
-
+        qr_code_time = decode_qr_code(np.array(frame.to_image()))
         if qr_code_time:
             last_qr_code_time = qr_code_time
-            last_qr_code_tps = frame.pts * frame.time_base
-
-            print(f"QR Code initial détecté: {last_qr_code_time}")
+            last_qr_code_tps = frame.pts
+            print("QR code time: ", last_qr_code_time)
             return
 
-def record_video(ip, film_duration):
-    global last_qr_code_time
-    global last_qr_code_tps
-    
+def record_video(ip):
+    global last_qr_code_time, last_qr_code_tps
     stream_url = f'udp://{ip}:8554?overrun_nonfatal=1&fifo_size=50000000'
-    
-    # Ouvrir le flux vidéo
-    input_container = av.open(stream_url, options={'analyzeduration': '5000000', 'probesize': '5000000'})
+    input_container = av.open(stream_url, options={'analyzeduration': '10000000', 'probesize': '10000000'})
     input_stream = input_container.streams.video[0]
-
-    # Récupérer le time_base du flux vidéo
     time_base = input_stream.time_base
-    print(f"Time Base: {time_base}")
+    output_file = f"Sortie_{ip}_{time.strftime('%Y-%m-%d_%H-%M-%S-%f')}.mp4"
 
-    d = time.strftime("%Y-%m-%d_%H-%M-%S-%f")
-    output_file = f"Sortie_{ip}_{d}.mp4"
     with av.open(output_file, mode='w') as output_container:
-        # Créer le flux de sortie en se basant sur le flux d'entrée
-        fps = input_stream.codec_context.rate if input_stream.codec_context.rate else Fraction(30, 1)  # Définir un taux de trame par défaut si nécessaire
-
-        # Paramètres pour le codec plus rapide
-        codec_name = 'libx264'  # Utilisation du codec H.264
-        codec_options = {'preset': 'veryfast'}  # Réglage pour un encodage plus rapide
-
-        # Créer le flux de sortie en se basant sur le flux d'entrée
-        out_stream = output_container.add_stream(codec_name, str(fps))
+        out_stream = output_container.add_stream('libx264', str(input_stream.codec_context.rate or Fraction(30, 1)))
         out_stream.width = input_stream.codec_context.width
         out_stream.height = input_stream.codec_context.height
-        out_stream.pix_fmt = 'yuv420p'  # Utiliser un format de pixel standard pour la compatibilité
+        out_stream.pix_fmt = 'yuv420p'
         out_stream.time_base = time_base
-        out_stream.codec_context.options =  {'preset': 'veryfast'}
-
-        # Appliquer les options du codec
-        out_stream.codec_context.options = codec_options
+        out_stream.codec_context.options = {
+            'preset': 'ultrafast',
+            'tune': 'zerolatency',
+            'crf': '30',
+            'profile': 'baseline'
+        }
 
         start_time = time.time()
         first_pts = None
-        last_pts = None
+        frame_count = 0
+        last_frame = None
+        last_time = None
+        for packet in input_container.demux(input_stream):
+            if packet.stream.type == 'video':
+                frame = packet.decode()[0] if packet.decode() else None
+                if not frame:
+                    continue
+                if time.time() - start_time > STREAM_DURATION:
+                    break
+                if first_pts is None:
+                    first_pts = frame.pts
+                if frame_count % 2 == 0:
+                    add_to_spreadsheet(output_file, float((frame.pts - first_pts) * time_base), last_qr_code_time + timedelta(seconds=float((frame.pts - last_qr_code_tps) * time_base)))
+                    frame.pts -= first_pts
+                    out_packet = out_stream.encode(frame)
+                    output_container.mux(out_packet) 
 
-        for frame in input_container.decode(input_stream):
-            if time.time() - start_time > film_duration:
-                break
+                    last_frame = frame
+                    last_time = time.time()
 
-            if first_pts is None:
-                first_pts = frame.pts
-            frame.pts = frame.pts - first_pts
-            last_pts = frame.pts
+                frame_count += 1
 
-            out_packet = out_stream.encode(frame)   # Fonction à accélérer
-
-            output_container.mux(out_packet)
-        
-        print("Temps réel : ", float(time.time() - start_time))
-        print("Dernière heure de capture : {0:0.1f}".format(float(last_pts*time_base)))
-
-        # Finaliser l'encodage
-        """
-        try:
-            out_packet = out_stream.encode(None)
-            while out_packet:
-                output_container.mux(out_packet)
-                out_packet = out_stream.encode(None)
-        except av.EOFError:
-            # Fin de l'encodage, aucune action supplémentaire n'est nécessaire
-            pass"""
-    
+        print("Temps réel : ", float(last_time - start_time))
+        print("Dernière heure de capture : {0:0.1f}".format(float(last_frame.pts * time_base)))    
     input_container.close()
 
-
 def start_and_set_fov():
-    print ("Starting GoPro cameras, setting resolution and fov...")
-    global fov, resolution
     gopro_ip_addresses = get_gopro_ip_addresses()
     for gopro_ip in gopro_ip_addresses:
-        if start_and_set_gopro_resolutionand_fov(gopro_ip, resolution, fov):
+        if start_and_set_gopro_resolutionand_fov(gopro_ip):
             time.sleep(5)
-            print (f"GoPro at {gopro_ip} started and set to resolution {resolution} and fov {fov}")
     return gopro_ip_addresses
 
 def main():
-    global last_qr_code_time
-
-    print("Démarrage du processus")
-    # Uniquement pour les tests
-    last_qr_code_time = "2021-10-01T12:00:00.000Z"
-    try:
+    if stop_stream:
+        stop_all_gopro(get_gopro_ip_addresses())
+    else:
         gopro_ip_addresses = start_and_set_fov()
-
-        # Attendre le QR Code initial pour calibrer l'heure
         wait_for_initial_qr_code()
-
-        # Boucle pour enregistrer les vidéos
-        total_videos = timeToStream // filmDuration
-        for _ in range(total_videos):
+        for _ in range(NUMBER_OF_STREAMS):
             for gopro_ip in gopro_ip_addresses:
-                print(f"Enregistrement vidéo depuis {gopro_ip}")
-                d = time.strftime("%Y-%m-%d_%H-%M-%S")
-                record_video(gopro_ip, filmDuration)
-
-        stop_all_gopro(get_gopro_ip_addresses())
-
-    except Exception as e:
-        print(f"Une erreur est survenue : {e}")
-        stop_all_gopro(get_gopro_ip_addresses())
+                record_video(gopro_ip)
+        stop_all_gopro(gopro_ip_addresses)
 
 if __name__ == "__main__":
     try:
-        if stop_stream:
-            stop_all_gopro(get_gopro_ip_addresses())
-        else:
-            main()
+        main()
     except KeyboardInterrupt:
         print("Processus arrêté manuellement.")
-
-"""
-Code pour générer le QRCode en temps réel
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <title>QR Code Générateur en Temps Réel</title>
-    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
-</head>
-<body>
-    <div id="qrcode"></div>
-    <p id="currentDateTime"></p>
-    <script>
-        function getCurrentDateTime() {
-            return new Date().toISOString();
-        }
-
-        function updateQRCode() {
-            const currentDateTime = getCurrentDateTime();
-            document.getElementById('currentDateTime').innerText = currentDateTime;
-
-            // Effacer le QR Code précédent
-            const qrcodeContainer = document.getElementById("qrcode");
-            qrcodeContainer.innerHTML = '';
-
-            // Générer un nouveau QR Code
-            new QRCode(qrcodeContainer, currentDateTime);
-        }
-
-        setInterval(updateQRCode, 100); // Mettre à jour toutes les 100 millisecondes
-    </script>
-</body>
-</html>
-
-"""
