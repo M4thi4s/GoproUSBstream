@@ -1,0 +1,15 @@
+[Unit]
+Description=Mon Script Python
+After=multi-user.target
+
+[Service]
+WorkingDirectory=/home/admin/Documents/goproProject/
+Type=simple
+Restart=always
+RestartSec=5
+User=admin
+ExecStart=/home/admin/Documents/goproProject/.venv/bin/python /home/admin/Documents/goproProject/server.py
+[Install]
+WantedBy=multi-user.target
+
+

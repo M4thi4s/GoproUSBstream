@@ -15,6 +15,8 @@ import warnings
 import os
 from configs import output_gopro_folder
 
+av.logging.set_level(av.logging.ERROR)
+
 # Fonctions
 def get_gopro_ip_addresse():
     #gopro_ip_addresses = []
@@ -58,12 +60,12 @@ def decode_qr_code(image):
             return qr_time.timestamp()
     return None
 
-def add_to_spreadsheet(output_video_file_name, output_folder, frame_time_in_video, real_time):
+def add_to_spreadsheet(photo_file_name, output_folder, exact_datetime):
     file_path = os.path.join(output_folder, 'tps_data.csv')
-    df = pd.DataFrame([[output_video_file_name, frame_time_in_video, real_time]], columns=['Video file name', 'frame time', 'Datetime'])
-    header = not pd.io.common.file_exists(file_path)
+    df = pd.DataFrame([[photo_file_name, exact_datetime]], columns=['Photo file name', 'Exact datetime'])
+    header = not os.path.exists(file_path)
     df.to_csv(file_path, mode='a', index=False, header=header)
-
+    
 def wait_for_initial_qr_code(ip, resolution_id):
     width_resolution, height_resolution = get_resolution_width_and_height(resolution_id)
     fifo_size = int(width_resolution * height_resolution * 1.5 * 3)
@@ -93,7 +95,7 @@ def wait_for_initial_qr_code(ip, resolution_id):
             print("QR code time: ", frame.pts)
             return qr_code_time, frame.pts
 
-def record_video(ip, output_folder, last_qr_code_time, last_qr_code_tps, video_duration, shared_output_dict):
+def record_images(ip, output_folder, last_qr_code_time, last_qr_code_tps, video_duration, shared_output_dict):
     stream_url = f'udp://{ip}:8554?overrun_nonfatal=1&fifo_size=50000000'
     input_container = av.open(stream_url, options={'analyzeduration': '10000000', 'probesize': '10000000'})
     input_stream = input_container.streams.video[0]
@@ -103,63 +105,55 @@ def record_video(ip, output_folder, last_qr_code_time, last_qr_code_tps, video_d
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    output_file_name = f"Sortie_{time.strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
-    output_file_path = os.path.join(output_folder, output_file_name)
+    first_pts = None
+    frame_count = 0
+    
+    shared_output_dict["number_of_picture"] = 0
+    shared_output_dict["buffer_late"] = 0
+    output_refresh_delay = 30  # secondes
+    output_refresh_last_time = datetime.now().timestamp()
 
-    with av.open(output_file_path, mode='w') as output_container:
-        out_stream = output_container.add_stream('libx264', str(input_stream.codec_context.rate or Fraction(30, 1)))
-        out_stream.width = input_stream.codec_context.width
-        out_stream.height = input_stream.codec_context.height
-        out_stream.pix_fmt = 'yuv420p'
-        out_stream.time_base = time_base
-        out_stream.codec_context.options = {
-            'preset': 'ultrafast',
-            'tune': 'zerolatency',
-            'crf': '30',
-            'profile': 'baseline'
-        }
+    for packet in input_container.demux(input_stream):
+        if packet.stream.type != 'video':
+            continue
 
-        start_time = datetime.utcnow().timestamp()
-        first_pts = None
-        frame_count = 0
-        
-        shared_output_dict["number_of_picture"] = 0
-        output_refresh_delay = 15  # secondes
-        output_refresh_last_time = start_time
-
-        for packet in input_container.demux(input_stream):
-            if packet.stream.type != 'video':
-                continue
-
-            frame = packet.decode()[0] if packet.decode() else None
-            if not frame:
-                continue
-
+        for frame in packet.decode():
             if first_pts is None:
                 first_pts = frame.pts
+                start_time = datetime.now().timestamp()
 
             tps_time_in_video = (frame.pts - first_pts) * time_base
+            
+            # Vérifier si la durée spécifiée est dépassée
+            if tps_time_in_video > video_duration:
+                input_container.close()
+                return
 
-            # On coupe la vidéo au bout du temps défini par l'utilisateur, ce temps est souvent plus long que le temps réel suivant la puissance de la puce
-            current_time = datetime.utcnow().timestamp()
-            if tps_time_in_video > video_duration:  
-                break
+            if frame_count % 2 == 0:  # Ne traiter qu'une image sur deux
+                photo_file_name = f"Image_{frame_count//2:04d}_{frame.pts}.jpg"
+                photo_file_path = os.path.join(output_folder, photo_file_name)
 
-            if frame_count % 5 == 0:
-                tps_time_using_qr_code = last_qr_code_time + (frame.pts - last_qr_code_tps) * time_base
+                # Calculer l'heure exacte de la photo en utilisant le temps du dernier QR code détecté
+                exact_datetime = datetime.fromtimestamp(last_qr_code_time + (frame.pts - last_qr_code_tps) * float(time_base))
 
-                frame.pts -= first_pts
-                add_to_spreadsheet(output_file_name, output_folder, float(tps_time_in_video), datetime.fromtimestamp(tps_time_using_qr_code))
-                out_packet = out_stream.encode(frame)
-                output_container.mux(out_packet) 
+                # Sauvegarder l'image
+                frame.to_image().save(photo_file_path)
 
+                # Ajouter l'information au CSV
+                add_to_spreadsheet(photo_file_name, output_folder, exact_datetime.isoformat())
+
+                # Mise à jour du shared_output_dict
+                current_time = datetime.now().timestamp()
                 if current_time - output_refresh_last_time > output_refresh_delay:
-                    shared_output_dict["number_of_picture"] = frame_count
+                    shared_output_dict["number_of_picture"] = frame_count // 2
                     shared_output_dict["buffer_late"] = ((current_time - start_time) - tps_time_in_video)
                     output_refresh_last_time = current_time  # Réinitialiser le timer pour le prochain rafraîchissement
 
             frame_count += 1
+
     input_container.close()
+    shared_output_dict["total_images_captured"] = frame_count // 2
+
 
 def start_and_set_fov(resolution, fov):
     gopro_ip_addresse = get_gopro_ip_addresse()
@@ -188,9 +182,9 @@ def startRecord(outputFolder, shared_output_dict, resolution_id, number_of_video
         shared_output_dict["state"] = 1
 
         shared_output_dict["output_string"] += "En attente du QRCode\n"
-        #last_qr_code_time, last_qr_code_tps = wait_for_initial_qr_code(gopro_ip, resolution_id)  # Commenté pour les tests
-        last_qr_code_time = time.time()
-        last_qr_code_tps = 0
+        last_qr_code_time, last_qr_code_tps = wait_for_initial_qr_code(gopro_ip, resolution_id)  # Commenté pour les tests
+        # last_qr_code_time = time.time()
+        # last_qr_code_tps = 0
         shared_output_dict["state"] = 2
         
         shared_output_dict["output_string"] += "QR code détecté\n"
@@ -203,7 +197,7 @@ def startRecord(outputFolder, shared_output_dict, resolution_id, number_of_video
 
         for i in range(number_of_videos):
             shared_output_dict["video_number"] = i + 1
-            record_video(gopro_ip, outputFolder, last_qr_code_time, last_qr_code_tps, video_duration, shared_output_dict)
+            record_images(gopro_ip, outputFolder, last_qr_code_time, last_qr_code_tps, video_duration, shared_output_dict)
 
         shared_output_dict["state"] = 3
         stop_gopro(gopro_ip)
@@ -211,6 +205,8 @@ def startRecord(outputFolder, shared_output_dict, resolution_id, number_of_video
         shared_output_dict["output_string"] += "Capture terminée\n"
 
     except Exception as e:
+        print(e)
+        
         shared_output_dict["state"] = -1
         shared_output_dict["error"] = str(e)
         shared_output_dict["output_string"] += "Une erreur est survenue\n"
@@ -218,7 +214,6 @@ def startRecord(outputFolder, shared_output_dict, resolution_id, number_of_video
         if gopro_ip:
             stop_gopro(gopro_ip)
             shared_output_dict["output_string"] += "GoPro arrêtée\n"
-        print(e)
 
     finally:
         shared_output_dict["end_time"] = time.time()

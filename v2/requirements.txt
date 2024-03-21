@@ -1,0 +1,11 @@
+pandas
+psutil
+requests
+opencv-python
+numpy
+av
+pyzbar
+Flask
+flask-restx
+pyserial
+werkzeug

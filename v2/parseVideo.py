@@ -7,6 +7,8 @@ import numpy as np
 import cv2
 import concurrent.futures
 
+BLUR_THRESHOLD = 200
+
 def start_extract_images_and_match_coordinates(input_folder, output_folder, coordinates, shared_parsing_info):
     try :
         extract_images_and_match_coordinates(input_folder, output_folder, coordinates, shared_parsing_info)
@@ -61,7 +63,12 @@ def extract_images_and_match_coordinates(input_folder, output_folder, coordinate
                     nearest_time = find_nearest_time(frame_time_dict, tps_time_in_video, tolerance)
                     if nearest_time is not None:
                         row = frame_time_dict[nearest_time]
-                        exact_time = datetime.strptime(row['Datetime'], '%Y-%m-%d %H:%M:%S.%f')
+
+                        datetime_str = row['Datetime']
+                        try:
+                            exact_time = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M:%S.%f')
+                        except ValueError:
+                            exact_time = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M:%S')
 
                         image_file_name = exact_time.strftime('%Y-%m-%d_%H-%M-%S-%f') + '.png'
 

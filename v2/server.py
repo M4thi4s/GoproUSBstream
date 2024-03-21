@@ -1,15 +1,17 @@
 from flask import Flask, request, jsonify, Response, stream_with_context
-from flask_restx import Api, Resource, Namespace, fields
+from flask_restx import Api, Resource, Namespace, fields, reqparse
 import os
 import multiprocessing
 from multiprocessing import Manager
 from gopro import startRecord, shutdown_gopro
 import psutil
 import zipfile
-from configs import output_folder, output_gopro_folder, output_parsed_folder
+from configs import output_folder, output_gopro_folder
 import numpy as np
-from parseVideo import start_extract_images_and_match_coordinates
+from parsePhotos import start_extract_images_and_match_coordinates
 import time
+import pandas as pd
+from werkzeug.datastructures import FileStorage
 
 app = Flask(__name__)
 
@@ -30,20 +32,18 @@ start_capture_model = api.model('StartCapture', {
     'resolution': fields.Integer(default=7, description='4: (640, 480), 7: (1280, 720), 12: (1920, 1080)'),
 })
 
-# Définition du modèle de requête pour /parse_videos
-parse_videos_model = api.model('ParseVideos', {
-    'directory_name': fields.String(description='Nom du dossier à traiter (date au format AAAA-MM-JJ)'),
-    'coordinates_file': fields.String(description='Fichier CSV contenant les coordonnées GPS (au format "TimeStamp,Latitude,Longitude". Les élements doivents être séparés par des virgules et les lignes par des retours à la ligne)'),
-})
-
-# Partage des données entre les processus
-manager = Manager()
-
-shared_gopro_capture_info = manager.dict()
-shared_parsing_info = manager.dict()
-
-# Variable pour conserver le processus en cours
+# Initialisation des variables globales
+manager = None
+shared_gopro_capture_info = None
+shared_parsing_info = None
 current_process = None
+
+def initialize_manager():
+    global manager, shared_gopro_capture_info, shared_parsing_info, current_process
+    manager = Manager()
+    shared_gopro_capture_info = manager.dict()
+    shared_parsing_info = manager.dict()
+    current_process = None
 
 @ns_gopro.route('/start_capture')
 class StartCapture(Resource):
@@ -111,48 +111,60 @@ class ListDirectories(Resource):
         directories = [d for d in os.listdir(output_folder) if os.path.isdir(os.path.join(output_folder, d))]
         return jsonify(directories)
 
-@ns_file_management.route('/parse_videos')
+
+
+
+
+# Définition du modèle de requête pour /associate_photos_with_GPS_data
+ns_file_management = Namespace('file_management', description='Gestion des fichiers')
+api.add_namespace(ns_file_management)
+
+# Création d'un parser pour le téléchargement de fichiers
+file_upload = reqparse.RequestParser()
+file_upload.add_argument('coordinates_file', type=FileStorage, location='files', required=True, help='Fichier CSV contenant les coordonnées GPS')
+file_upload.add_argument('directory_name', type=str, required=True, help='Nom du dossier de sortie')
+
+@ns_file_management.route('/associate_photos_with_GPS_data')
 class ParseVideos(Resource):
-    @api.expect(parse_videos_model)
+    @api.expect(file_upload)  # Parser pour le fichier
     def post(self):
         global current_process
 
-        # Vérifier si un processus est déjà en cours
         if current_process is not None and current_process.is_alive():
             return {'state': 'Ko', 'error': 'Process is already running'}
 
         # reset dict
         shared_parsing_info.clear()
 
-        args = request.json
-
-        # Exemple d'utilisation du script
-        input_folder = os.path.join(output_folder, args['directory_name'], output_gopro_folder)
-        output_folder_date = os.path.join(output_folder, args['directory_name'], output_parsed_folder)
+        uploaded_file_args = file_upload.parse_args()
+        uploaded_file = uploaded_file_args['coordinates_file']
+        directory_name = uploaded_file_args['directory_name']
+        
+        input_folder = os.path.join(output_folder, directory_name, output_gopro_folder)
+        output_folder_date = os.path.join(output_folder, directory_name, output_gopro_folder)
 
         if not os.path.exists(input_folder):
             return {'state': 'Ko', 'error': 'Folder does not exist'}
 
-        try:
-            coordinatesNumpy = np.array([x.split(',') for x in args['coordinates_file'].split('\n') if x != ''])
-            if coordinatesNumpy.shape[1] != 3:
-                return {'state': 'Ko', 'error': 'Invalid coordinates file format. Must be "TimeStamp,Latitude,Longitude"'}
-                        # check if TimeStamp,Latitude,Longitude is present on top of file
-            if coordinatesNumpy[0, 0] == "TimeStamp" and coordinatesNumpy[0, 1] == "Latitude" and coordinatesNumpy[0, 2] == "Longitude":
-                coordinatesNumpy = np.delete(coordinatesNumpy, 0, 0)
-            else:
-                raise Exception("Invalid coordinates file format. Must be \"TimeStamp,Latitude,Longitude\"")
 
-            coordinatesNumpy = coordinatesNumpy.astype(np.float64)
+        try:
+            # Lire le fichier CSV avec pandas
+            df = pd.read_csv(uploaded_file)
+
+            # Vérifier le format des colonnes
+            if df.columns.tolist() != ["Time (UTC)", "Latitude", "Longitude", "Altitude", "Satellites", "HDOP"]:
+                raise Exception("Invalid file format. Expected columns: 'Time (UTC)', 'Latitude', 'Longitude', 'Altitude', 'Satellites', 'HDOP'")
+
+            # Convertir le DataFrame en un tableau NumPy
+            coordinatesNumpy = df.to_numpy()
 
         except Exception as e:
-            return {'state': 'Ko', 'error': 'Error while parsing coordinates file. '+str(e)}
-                
-        current_process = multiprocessing.Process(target=start_extract_images_and_match_coordinates, args=(input_folder, output_folder_date, coordinatesNumpy, shared_parsing_info))
+            return {'state': 'Ko', 'error': f'Error while parsing coordinates file. {e}'}
+        
+        current_process = multiprocessing.Process(target=start_extract_images_and_match_coordinates, args=(input_folder, coordinatesNumpy, shared_parsing_info))
         current_process.start()
         return {'state': 'Ok'}
-
-
+    
 @ns_file_management.route('/download_directory/<string:directory_name>')
 @api.param('directory_name', 'Nom du dossier à télécharger')
 class DownloadDirectory(Resource):
@@ -162,7 +174,7 @@ class DownloadDirectory(Resource):
         if current_process is not None and current_process.is_alive():
             return {'state': 'Ko', 'error': 'Process is already running'}
         
-        directory_path_full = os.path.join(output_folder, directory_name, output_parsed_folder)
+        directory_path_full = os.path.join(output_folder, directory_name, output_gopro_folder)
 
         if not os.path.exists(directory_path_full):
             return {'state': 'Ko', 'error': 'Folder does not exist or the parsing process is not started.'}
@@ -188,4 +200,5 @@ class DownloadDirectory(Resource):
         return response
 
 if __name__ == '__main__':
+    initialize_manager()  # Initialisation du Manager et des variables partagées
     app.run(host='0.0.0.0', port=8080)

@@ -1,0 +1,10 @@
+Ce projet permet d'enregistrer des flux vidéos extrait d'une Gopro branché en USB.
+Ce projet permet également d'extraire les image de ces flux vidéos en récuperant l'heure exacte de la photo.
+Description du projet : 
+- Extraction du flux vidéo d'une gopro en enregistrant l'heure exacte de chaque frame (précision ~100ms)
+- Calibration de l'heure via un QRCode
+- Extraction des images des vidéos en les associants à une heure exacte et à une position GPS la plus précise possible
+- Récuperation des positions d'un GPS (EOS Arrow 100+) et enregistrement de ces valeurs dans un tableur.
+
+Nom du réseau wifi : EdenCar => Pas de mot de passe
+Pour changer la fréquence de rafraichissement du GPS il faut utiliser le logiciel EOS Utility et changer les configuration du mode "USB"
