@@ -1,116 +1,94 @@
 import os
 import csv
-import datetime
 import serial
 import serial.tools.list_ports
-import pandas as pd
-import datetime
 from datetime import datetime
-import time 
+import time
 
 def convert_gps_time_to_datetime(gps_time):
-    # gps_time est une chaîne sous la forme 'hhmmss.sss'
-    hour = int(gps_time[0:2])
+    hour = int(gps_time[:2])
     minute = int(gps_time[2:4])
     second = int(gps_time[4:6])
-    microsecond = int(float(gps_time[6:]) * 1000000)  # Conversion des millisecondes en microsecondes
-
-    # Utilisez datetime.now() pour obtenir la date actuelle
+    microsecond = int(float(gps_time[6:]) * 1000000)
     now = datetime.now()
-
-    # Créez un objet datetime avec la date actuelle et l'heure GPS
-    date_time_obj = datetime(now.year, now.month, now.day, hour, minute, second, microsecond)
-
-    # Convertir en timestamp Unix (en secondes)
-    timestamp = date_time_obj.timestamp()
-    return timestamp
-
+    return datetime(now.year, now.month, now.day, hour, minute, second, microsecond)
 
 def parse_gpgga(gpgga_message):
-    print (gpgga_message)
     parts = gpgga_message.split(',')
-
-    if len(parts) < 15 or parts[0] != '$GPGGA' or not parts[2] or not parts[4]:
-        print("Message GPGGA invalide.")
+    if len(parts) < 15 or parts[0] != '$GPGGA':
         return None
-    else :
-        print("Message GPGGA valide.")
-
-    latitude = float(parts[2])
-    latitude_degrees = int(latitude / 100)
-    latitude_minutes = latitude - latitude_degrees * 100
-    latitude_decimal = latitude_degrees + latitude_minutes / 60
-    if parts[3] == 'S':
-        latitude_decimal *= -1
-
-    longitude = float(parts[4])
-    longitude_degrees = int(longitude / 100)
-    longitude_minutes = longitude - longitude_degrees * 100
-    longitude_decimal = longitude_degrees + longitude_minutes / 60
-    if parts[5] == 'W':
-        longitude_decimal *= -1
 
     time_utc = convert_gps_time_to_datetime(parts[1])
+    latitude_decimal = convert_to_decimal(parts[2], parts[3])
+    longitude_decimal = convert_to_decimal(parts[4], parts[5])
     altitude = parts[9]
     satellites = parts[7]
     hdop = parts[8]
 
-    return {
-        'Time (UTC)': time_utc,
-        'Latitude': latitude_decimal,
-        'Longitude': longitude_decimal,
-        'Altitude': altitude,
-        'Satellites': satellites,
-        'HDOP': hdop
-    }
+    return {'time_utc': time_utc, 'latitude': latitude_decimal, 'longitude': longitude_decimal, 'altitude': altitude, 'satellites': satellites, 'hdop': hdop}
+
+def parse_gprmc(gprmc_message):
+    parts = gprmc_message.split(',')
+    if len(parts) < 13 or parts[0] != '$GPRMC' or parts[2] != 'A':
+        return None
+
+    time_utc = convert_gps_time_to_datetime(parts[1])
+    true_heading = parts[8]
+
+    return {'time_utc': time_utc, 'true_heading': true_heading}
+
+def convert_to_decimal(coord_str, direction):
+    # Séparation des degrés et des minutes en fonction du format DDMM.MMMM
+    d, m = divmod(float(coord_str), 100)
+    decimal = d + (m / 60)
+
+    # Inversion de la valeur pour les directions Sud et Ouest
+    if direction in ['S', 'W']:
+        decimal *= -1
+
+    return decimal
 
 def detect_gps_port():
     ports = serial.tools.list_ports.comports()
     for port in ports:
         if "Eos GNSS" in port.description:
-            print (f"Capteur GPS 'Eos Tools Pro' détecté sur le port {port.device}.")
             return port.device
-    raise Exception("Capteur GPS 'Eos Tools Pro' non détecté.")
+    raise Exception("GPS sensor not detected.")
 
 def main(port=None):
-    if port is None:
-        port = detect_gps_port()
+    port = port or detect_gps_port()
     baud_rate = 19200
     output_folder = os.path.join('output', datetime.now().strftime('%Y-%m-%d'))
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+    os.makedirs(output_folder, exist_ok=True)
     positions_folder = os.path.join(output_folder, 'positions')
-    if not os.path.exists(positions_folder):
-        os.makedirs(positions_folder)
+    os.makedirs(positions_folder, exist_ok=True)
     csv_file_path = os.path.join(positions_folder, 'gps_data.csv')
     file_exists = os.path.isfile(csv_file_path)
-        
-    ser = serial.Serial(port, baud_rate)
 
-    with open(csv_file_path, mode='a', newline='') as file:
+    with serial.Serial(port, baud_rate) as ser, open(csv_file_path, mode='a', newline='') as file:
         writer = csv.writer(file)
         if not file_exists:
-            writer.writerow(['Time (UTC)', 'Latitude', 'Longitude', 'Altitude', 'Satellites', 'HDOP'])
+            writer.writerow(['Time (UTC)', 'Latitude', 'Longitude', 'Altitude', 'Satellites', 'HDOP', 'True Heading'])
 
-        last_flush_time = time.time()
+        gpgga_data = None
         try:
             while True:
-                line = ser.readline().decode('utf-8').strip()
+                line = ser.readline().decode('utf-8', errors='replace').strip()
+                print(line)
+
                 if line.startswith('$GPGGA'):
-                    data = parse_gpgga(line)
-                    if data:
-                        writer.writerow([data['Time (UTC)'], data['Latitude'], data['Longitude'], data['Altitude'], data['Satellites'], data['HDOP']])
-                        if time.time() - last_flush_time > 10:
-                            file.flush()
-                            last_flush_time = time.time()
+                    gpgga_data = parse_gpgga(line)
+                elif line.startswith('$GPRMC'):
+                    gprmc_data = parse_gprmc(line)
+
+                    if gprmc_data and gpgga_data and gprmc_data['time_utc'] == gpgga_data['time_utc']:
+                        writer.writerow([gpgga_data['time_utc'], gpgga_data['latitude'], gpgga_data['longitude'], gpgga_data['altitude'], gpgga_data['satellites'], gpgga_data['hdop'], gprmc_data['true_heading']])
+                        file.flush()
         except KeyboardInterrupt:
-            print("Arrêt du script par l'utilisateur.")
-        finally:
-            ser.close()
-            print("Connexion série fermée.")
+            print("Script stopped by user.")
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"Erreur: {e}")
+        print(f"Error: {e}")

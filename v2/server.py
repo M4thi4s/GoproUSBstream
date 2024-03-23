@@ -152,7 +152,7 @@ class ParseVideos(Resource):
             df = pd.read_csv(uploaded_file)
 
             # Vérifier le format des colonnes
-            if df.columns.tolist() != ["Time (UTC)", "Latitude", "Longitude", "Altitude", "Satellites", "HDOP"]:
+            if df.columns.tolist() != ["Time (UTC)","Latitude","Longitude","Altitude","Satellites","HDOP","True Heading"]:
                 raise Exception("Invalid file format. Expected columns: 'Time (UTC)', 'Latitude', 'Longitude', 'Altitude', 'Satellites', 'HDOP'")
 
             # Convertir le DataFrame en un tableau NumPy

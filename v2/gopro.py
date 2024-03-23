@@ -129,7 +129,7 @@ def record_images(ip, output_folder, last_qr_code_time, last_qr_code_tps, video_
                 input_container.close()
                 return
 
-            if frame_count % 2 == 0:  # Ne traiter qu'une image sur deux
+            if frame_count % 6 == 0:  # Ne traiter qu'une image sur deux
                 photo_file_name = f"Image_{frame_count//2:04d}_{frame.pts}.jpg"
                 photo_file_path = os.path.join(output_folder, photo_file_name)
 
