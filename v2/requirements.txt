@@ -9,3 +9,4 @@ Flask
 flask-restx
 pyserial
 werkzeug
+flask-cors

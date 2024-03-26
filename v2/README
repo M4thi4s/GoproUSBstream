@@ -8,3 +8,15 @@ Description du projet :
 
 Nom du réseau wifi : EdenCar => Pas de mot de passe
 Pour changer la fréquence de rafraichissement du GPS il faut utiliser le logiciel EOS Utility et changer les configuration du mode "USB"
+
+
+Todo list : 
+- L'id envoyé ne change pas la résolution (voir image Image_12912_83074992.jpg) => Prendre image en 1080p
+- Augmenter le nombre de photo skip de %6 à %10
+- Tester avec d'autre FOV dans la qualité pour la lecture de charactères
+- Faire un test de 2h et analyser le retard du buffer avec une meilleur résolution 
+- Analyser ce qu'il se passe quand le buffer atteint sa taille max, calculer à quel durée dans le buffer ce moment arrivera
+- Connecter automatiquement la raspberry au réseau wifi
+-
+
+Test du 23/03/24 => 15min = 1go %6

@@ -4,6 +4,17 @@ import serial
 import serial.tools.list_ports
 from datetime import datetime
 import time
+import traceback
+import logging
+
+log_file = "capturePosition.log"
+
+if os.path.exists(log_file):
+    os.remove(log_file)
+
+logging.basicConfig(filename=log_file, 
+                    level=logging.INFO, 
+                    format='%(asctime)s: %(message)s')
 
 def convert_gps_time_to_datetime(gps_time):
     hour = int(gps_time[:2])
@@ -65,6 +76,9 @@ def main(port=None):
     csv_file_path = os.path.join(positions_folder, 'gps_data.csv')
     file_exists = os.path.isfile(csv_file_path)
 
+    last_message_time = time.time()
+    time_between_messages = 15
+
     with serial.Serial(port, baud_rate) as ser, open(csv_file_path, mode='a', newline='') as file:
         writer = csv.writer(file)
         if not file_exists:
@@ -74,21 +88,33 @@ def main(port=None):
         try:
             while True:
                 line = ser.readline().decode('utf-8', errors='replace').strip()
-                print(line)
+                try : 
+                    if line.startswith('$GPGGA'):
+                        gpgga_data = parse_gpgga(line)
+                    elif line.startswith('$GPRMC'):
+                        gprmc_data = parse_gprmc(line)
 
-                if line.startswith('$GPGGA'):
-                    gpgga_data = parse_gpgga(line)
-                elif line.startswith('$GPRMC'):
-                    gprmc_data = parse_gprmc(line)
+                        if gprmc_data and gpgga_data and gprmc_data['time_utc'] == gpgga_data['time_utc']:
 
-                    if gprmc_data and gpgga_data and gprmc_data['time_utc'] == gpgga_data['time_utc']:
-                        writer.writerow([gpgga_data['time_utc'], gpgga_data['latitude'], gpgga_data['longitude'], gpgga_data['altitude'], gpgga_data['satellites'], gpgga_data['hdop'], gprmc_data['true_heading']])
-                        file.flush()
+                            if last_message_time + time_between_messages < time.time():
+                                last_message_time = time.time()
+                                logging.info (f"Time: {gpgga_data['time_utc']}, Latitude: {gpgga_data['latitude']}, Longitude: {gpgga_data['longitude']}, Altitude: {gpgga_data['altitude']}, Satellites: {gpgga_data['satellites']}, HDOP: {gpgga_data['hdop']}, True Heading: {gprmc_data['true_heading']}")
+                           
+                            writer.writerow([gpgga_data['time_utc'], gpgga_data['latitude'], gpgga_data['longitude'], gpgga_data['altitude'], gpgga_data['satellites'], gpgga_data['hdop'], gprmc_data['true_heading']])
+                            file.flush()
+                        elif last_message_time + time_between_messages < time.time():
+                            logging.info("GPGGA and GPRMC messages do not match.")
+                            
+                except Exception as e:
+                    logging.info("Error while parsing GPS data.")
+                    logging.info(f"Error: {e}")
+                    logging.info(traceback.format_exc())
+
         except KeyboardInterrupt:
-            print("Script stopped by user.")
+            logging.info("Script stopped by user.")
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"Error: {e}")
+        logging.info(f"Error: {e}")

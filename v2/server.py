@@ -12,8 +12,10 @@ from parsePhotos import start_extract_images_and_match_coordinates
 import time
 import pandas as pd
 from werkzeug.datastructures import FileStorage
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 api = Api(app, version='1.0', title='GoPro API', description='Une API pour gérer la capture de vidéos GoPro')
 
@@ -27,9 +29,7 @@ api.add_namespace(ns_file_management)
 
 # Définition du modèle de requête pour /start_capture
 start_capture_model = api.model('StartCapture', {
-    'capture_duration': fields.Integer(default=15, description='Durée de l\'enregistrement en secondes'),
-    'capture_video_number': fields.Integer(default=2, description='Nombre de vidéos à créer'),
-    'resolution': fields.Integer(default=7, description='4: (640, 480), 7: (1280, 720), 12: (1920, 1080)'),
+    'resolution': fields.Integer(default=12, description='4: (640, 480), 7: (1280, 720), 12: (1920, 1080)'),
 })
 
 # Initialisation des variables globales
@@ -61,7 +61,7 @@ class StartCapture(Resource):
         current_output_folder = os.path.join(output_folder, time.strftime("%Y-%m-%d"), output_gopro_folder)
 
         args = request.json
-        current_process = multiprocessing.Process(target=startRecord, args=(current_output_folder, shared_gopro_capture_info, args['resolution'], args['capture_video_number'], args['capture_duration']))
+        current_process = multiprocessing.Process(target=startRecord, args=(current_output_folder, shared_gopro_capture_info, args['resolution']))
         current_process.start()
         return {'state': 'Ok'}
         
@@ -96,13 +96,20 @@ class KillCurrentProcess(Resource):
 
         if current_process is not None and current_process.is_alive():
             current_process.terminate()
-            current_process = None
+            # current_process = None
         
         try:
             shutdown_gopro()
-            return {'state': 'Process and gopro shutdwon successfully'}
+            return {'state': 'Process and gopro shutdown successfully'}
         except Exception as e:
             return {'state': 'Ko', 'error': 'Process shutdown but unable to shutting down the GoPro. '+str(e)}
+
+
+@ns_gopro.route('/stop_capture')
+class StopCaptureProcess(Resource):
+    def get(self):
+        shared_gopro_capture_info["end_time"] = time.time()
+        return {'state': 'Ok. Please wait for buffer to be written.'}
 
 
 @ns_file_management.route('/list_directories')
@@ -198,6 +205,27 @@ class DownloadDirectory(Resource):
         response = Response(stream_with_context(generate_zip()), mimetype='application/zip')
         response.headers['Content-Disposition'] = f'attachment; filename={directory_name}.zip'
         return response
+
+@ns_file_management.route('/delete_directory/<string:directory_name>')
+@api.param('directory_name', 'Nom du dossier à supprimer')
+class DeleteDirectory(Resource):
+    def get(self, directory_name):
+        global current_process
+
+        if current_process is not None and current_process.is_alive():
+            return {'state': 'Ko', 'error': 'Process is already running'}
+        
+        directory_path_full = os.path.join(output_folder, directory_name)
+
+        if not os.path.exists(directory_path_full):
+            return {'state': 'Ko', 'error': 'Folder does not exist.'}
+
+        try:
+            # Suppression du dossier
+            os.system(f'rm -rf {directory_path_full}')
+            return {'state': 'Ok'}
+        except Exception as e:
+            return {'state': 'Ko', 'error': f'Error while deleting directory. {e}'}
 
 if __name__ == '__main__':
     initialize_manager()  # Initialisation du Manager et des variables partagées

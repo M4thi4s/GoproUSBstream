@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contrôle GoPro</title>
+<link rel="stylesheet" href="index.css">
+<script src="index.js"></script>
+</head>
+<body>
+
+<section>
+  <select id="quality">
+    <option value="4">640x480</option>
+    <option value="7">1280x720</option>
+    <option value="12" selected>1920x1080</option>
+  </select>
+  <input type="text" id="ipGoproGauche" placeholder="IP Gopro Gauche">
+  <input type="text" id="ipGoproDroite" placeholder="IP Gopro Droite">
+  <button id="startStream">Démarrer les streams</button>
+</section>
+
+<section>
+  <h2>Logs</h2>
+  <button id="refreshLogs">Actualiser</button>
+  <button id="stopCapture">Arrêter la capture vidéo</button>
+  <div>
+    <textarea id="logsGoproGauche" rows="10" readonly></textarea>
+    <textarea id="logsGoproDroite" rows="10" readonly></textarea>
+  </div>
+</section>
+
+<section>
+  <h2>Récupération des données</h2>
+  <button id="associateGopros">Associer les images GPS (gopro gauche)</button>
+  <button id="downloadGauche">Télécharger les données (gopro gauche)</button>
+  <button id="downloadDroite">Télécharger les données (gopro droite)</button>
+</section>
+
+</body>
+</html>

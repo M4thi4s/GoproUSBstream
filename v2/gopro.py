@@ -10,10 +10,11 @@ from fractions import Fraction
 from pyzbar import pyzbar
 import re
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 import warnings
 import os
 from configs import output_gopro_folder
+import traceback
 
 av.logging.set_level(av.logging.ERROR)
 
@@ -57,6 +58,7 @@ def decode_qr_code(image):
         qr_data = obj.data.decode('utf-8')
         if re.match(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z', qr_data):
             qr_time = datetime.strptime(qr_data, '%Y-%m-%dT%H:%M:%S.%fZ')
+            qr_time = qr_time.replace(tzinfo=timezone.utc)
             return qr_time.timestamp()
     return None
 
@@ -95,7 +97,7 @@ def wait_for_initial_qr_code(ip, resolution_id):
             print("QR code time: ", frame.pts)
             return qr_code_time, frame.pts
 
-def record_images(ip, output_folder, last_qr_code_time, last_qr_code_tps, video_duration, shared_output_dict):
+def record_images(ip, output_folder, last_qr_code_time, last_qr_code_tps, shared_output_dict):
     stream_url = f'udp://{ip}:8554?overrun_nonfatal=1&fifo_size=50000000'
     input_container = av.open(stream_url, options={'analyzeduration': '10000000', 'probesize': '10000000'})
     input_stream = input_container.streams.video[0]
@@ -105,36 +107,32 @@ def record_images(ip, output_folder, last_qr_code_time, last_qr_code_tps, video_
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    first_pts = None
     frame_count = 0
     
     shared_output_dict["number_of_picture"] = 0
     shared_output_dict["buffer_late"] = 0
     output_refresh_delay = 30  # secondes
-    output_refresh_last_time = datetime.now().timestamp()
+    output_refresh_last_time = datetime.now(timezone.utc).timestamp()
 
     for packet in input_container.demux(input_stream):
         if packet.stream.type != 'video':
             continue
 
         for frame in packet.decode():
-            if first_pts is None:
-                first_pts = frame.pts
-                start_time = datetime.now().timestamp()
-
-            tps_time_in_video = (frame.pts - first_pts) * time_base
-            
-            # Vérifier si la durée spécifiée est dépassée
-            if tps_time_in_video > video_duration:
-                input_container.close()
-                return
-
-            if frame_count % 6 == 0:  # Ne traiter qu'une image sur deux
-                photo_file_name = f"Image_{frame_count//2:04d}_{frame.pts}.jpg"
-                photo_file_path = os.path.join(output_folder, photo_file_name)
+            if frame_count % 10 == 0:  # Ne traiter qu'une image sur n
+                current_time = datetime.now(timezone.utc).timestamp()
 
                 # Calculer l'heure exacte de la photo en utilisant le temps du dernier QR code détecté
                 exact_datetime = datetime.fromtimestamp(last_qr_code_time + (frame.pts - last_qr_code_tps) * float(time_base))
+
+                # Vérifier si la durée spécifiée est dépassée
+                if "end_time" in shared_output_dict and exact_datetime.timestamp() >= shared_output_dict["end_time"]:
+                    input_container.close()
+                    return
+
+                photo_file_name = f"Image_{frame_count//2:04d}_{frame.pts}.jpg"
+                photo_file_path = os.path.join(output_folder, photo_file_name)
+
 
                 # Sauvegarder l'image
                 frame.to_image().save(photo_file_path)
@@ -143,10 +141,9 @@ def record_images(ip, output_folder, last_qr_code_time, last_qr_code_tps, video_
                 add_to_spreadsheet(photo_file_name, output_folder, exact_datetime.isoformat())
 
                 # Mise à jour du shared_output_dict
-                current_time = datetime.now().timestamp()
                 if current_time - output_refresh_last_time > output_refresh_delay:
                     shared_output_dict["number_of_picture"] = frame_count // 2
-                    shared_output_dict["buffer_late"] = ((current_time - start_time) - tps_time_in_video)
+                    shared_output_dict["buffer_late"] = str(current_time-exact_datetime.timestamp())
                     output_refresh_last_time = current_time  # Réinitialiser le timer pour le prochain rafraîchissement
 
             frame_count += 1
@@ -173,7 +170,7 @@ def get_resolution_width_and_height(resolution_id):
     else :
         raise Exception("Invalid resolution ID")
 
-def startRecord(outputFolder, shared_output_dict, resolution_id, number_of_videos, video_duration, fov_id = 0):
+def startRecord(outputFolder, shared_output_dict, resolution_id, fov_id = 4):    # Tester avec fov_id = 2 (narrow) réduit considérablement l'effet de distorsion
     try:
         shared_output_dict["state"] = 0
         shared_output_dict["output_string"] = "Début du processus\n"
@@ -195,9 +192,7 @@ def startRecord(outputFolder, shared_output_dict, resolution_id, number_of_video
         # Creation du dossier output
         shared_output_dict["output_folder"] = outputFolder
 
-        for i in range(number_of_videos):
-            shared_output_dict["video_number"] = i + 1
-            record_images(gopro_ip, outputFolder, last_qr_code_time, last_qr_code_tps, video_duration, shared_output_dict)
+        record_images(gopro_ip, outputFolder, last_qr_code_time, last_qr_code_tps, shared_output_dict)
 
         shared_output_dict["state"] = 3
         stop_gopro(gopro_ip)
@@ -208,7 +203,7 @@ def startRecord(outputFolder, shared_output_dict, resolution_id, number_of_video
         print(e)
         
         shared_output_dict["state"] = -1
-        shared_output_dict["error"] = str(e)
+        shared_output_dict["error"] = traceback.format_exc()
         shared_output_dict["output_string"] += "Une erreur est survenue\n"
 
         if gopro_ip:
@@ -216,10 +211,9 @@ def startRecord(outputFolder, shared_output_dict, resolution_id, number_of_video
             shared_output_dict["output_string"] += "GoPro arrêtée\n"
 
     finally:
-        shared_output_dict["end_time"] = time.time()
+        shared_output_dict["real_end_time"] = time.time()
         shared_output_dict["output_string"] += "Fin du processus\n"
 
 
 def shutdown_gopro():
-    gopro_ip_addresses = get_gopro_ip_addresse()
-    stop_all_gopro(gopro_ip_addresses)
+    stop_gopro(get_gopro_ip_addresse())

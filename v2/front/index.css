@@ -1,0 +1,38 @@
+body {
+    font-family: Arial, sans-serif;
+    padding: 20px;
+  }
+  
+  section {
+    margin-bottom: 20px;
+  }
+  
+  textarea {
+    width: 100%;
+    margin-top: 10px;
+  }
+  
+  button {
+    margin-right: 10px;
+    padding: 10px;
+  }
+  
+  input {
+    margin-right: 10px;
+    padding: 5px;
+  }
+  
+  #refreshLogs, #stopCapture {
+    margin-top: 10px;
+  }
+  
+  div {
+    display: flex;
+    justify-content: space-between;
+  }
+  
+  textarea {
+    flex: 1;
+    margin: 0 10px;
+  }
+  
