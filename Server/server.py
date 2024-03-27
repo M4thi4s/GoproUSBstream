@@ -71,6 +71,7 @@ class MonitoringInfo(Resource):
         # Calcul de l'utilisation du disque
         disk_info = psutil.disk_usage('/')
         disk_usage_mb = disk_info.used / (1024 * 1024)  # Convertir en Mo
+        disk_usage_percent = disk_info.percent
 
         # Calcul de l'utilisation de la RAM
         ram_info = psutil.virtual_memory()
@@ -82,9 +83,10 @@ class MonitoringInfo(Resource):
 
         # Retourne les informations de monitoring
         return { 
-            'disk_usage': disk_usage_mb,
-            'ram_usage': ram_usage,
-            'swap_usage': swap_usage,
+            'disk_usage_Mo': disk_usage_mb,
+            'disk_usage_percent': disk_usage_percent,
+            'ram_usage_percent': ram_usage,
+            'swap_usage_percent': swap_usage,
             'gopro_capture_info': shared_gopro_capture_info.copy(),
             'parsing_info': shared_parsing_info.copy()
         }

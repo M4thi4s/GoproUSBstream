@@ -12,9 +12,15 @@ log_file = "capturePosition.log"
 if os.path.exists(log_file):
     os.remove(log_file)
 
-logging.basicConfig(filename=log_file, 
-                    level=logging.INFO, 
+# Pour imprimer les logs dans un fichier
+# logging.basicConfig(filename=log_file, 
+#                     level=logging.INFO, 
+#                     format='%(asctime)s: %(message)s')
+
+# Pour imprimer les logs dans la console
+logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s: %(message)s')
+logging.getLogger().addHandler(logging.StreamHandler())
 
 def convert_gps_time_to_datetime(gps_time):
     hour = int(gps_time[:2])
