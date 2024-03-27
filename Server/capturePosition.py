@@ -83,7 +83,8 @@ def main(port=None):
     file_exists = os.path.isfile(csv_file_path)
 
     last_message_time = time.time()
-    time_between_messages = 15
+    time_between_messages = 5
+    data_saved_count = 0
 
     with serial.Serial(port, baud_rate) as ser, open(csv_file_path, mode='a', newline='') as file:
         writer = csv.writer(file)
@@ -104,11 +105,13 @@ def main(port=None):
 
                             if last_message_time + time_between_messages < time.time():
                                 last_message_time = time.time()
-                                logging.info (f"Time: {gpgga_data['time_utc']}, Latitude: {gpgga_data['latitude']}, Longitude: {gpgga_data['longitude']}, Altitude: {gpgga_data['altitude']}, Satellites: {gpgga_data['satellites']}, HDOP: {gpgga_data['hdop']}, True Heading: {gprmc_data['true_heading']}")
+                                logging.info("GPGGA and GPRMC messages match. Number of data saved: " + str(data_saved_count))
+                                logging.info (f"Example : Time: {gpgga_data['time_utc']}, Latitude: {gpgga_data['latitude']}, Longitude: {gpgga_data['longitude']}, Altitude: {gpgga_data['altitude']}, Satellites: {gpgga_data['satellites']}, HDOP: {gpgga_data['hdop']}, True Heading: {gprmc_data['true_heading']}")
                            
                             writer.writerow([gpgga_data['time_utc'], gpgga_data['latitude'], gpgga_data['longitude'], gpgga_data['altitude'], gpgga_data['satellites'], gpgga_data['hdop'], gprmc_data['true_heading']])
                             file.flush()
-                        elif last_message_time + time_between_messages < time.time():
+                            data_saved_count += 1
+                        else:
                             logging.info("GPGGA and GPRMC messages do not match.")
                             
                 except Exception as e:
