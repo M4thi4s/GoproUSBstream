@@ -63,10 +63,10 @@ Pour changer la fréquence de rafraîchissement du GPS, utilisez le logiciel EOS
 # Calibration par QRCode
 Pour calibrer les flux des gopros à une heure exacte vous allez devoir utiliser un QRCode contenant l'heure précise en ms. Un fichier HTML générant ce QRCode est disponible dans le dossier v1/QRCodeDatTimeGenerator.html.
 
-# License
 ## Utilisation
-Pour démarrer l'enregistrement, accédez à l'endpoint /start_capture du serveur Flask. Utilisez les autres endpoints pour la gestion des fichiers, des photos et des données GPS.
-Contribution
+Voir le fichier Procédure.md
+
+# License
 
 ## Conditions d'Utilisation
 Libre d'utilisation et de modification : Vous pouvez utiliser et modifier ce code comme vous le souhaitez.
