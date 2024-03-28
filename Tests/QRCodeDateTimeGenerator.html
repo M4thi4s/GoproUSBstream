@@ -3,27 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <title>QR Code Générateur en Temps Réel</title>
-    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
 </head>
 <body>
-    <div id="qrcode"></div>
-    <p id="currentDateTime"></p>
+    <div style="text-align: center; margin-top:30px;">
+        <canvas id="qrcode"></canvas>
+        <h1 id="DateStr"></h1>        
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+
     <script>
-        function getCurrentDateTime() {
-            return new Date().toISOString();
-        }
-
+        var el = document.getElementById("qrcode");
+        var dateStr = document.getElementById("DateStr");
         function updateQRCode() {
-            const currentDateTime = getCurrentDateTime();
-            document.getElementById('currentDateTime').innerText = currentDateTime;
-
-            const qrcodeContainer = document.getElementById("qrcode");
-            qrcodeContainer.innerHTML = '';
-
-            new QRCode(qrcodeContainer, currentDateTime);
+            const currentDateTime = new Date().toISOString();
+            var qrcode = new QRious({
+                element: el, 
+                value: currentDateTime,
+                size: 400
+            });
+            dateStr.innerHTML = currentDateTime;
         }
 
-        setInterval(updateQRCode, 100); // Mettre à jour toutes les 100 millisecondes
+        setInterval(updateQRCode, 50); // Mettre à jour toutes les 100 millisecondes
     </script>
 </body>
 </html>
+
+
