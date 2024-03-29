@@ -85,3 +85,7 @@ Une fois le state à "done", accédez à "http://IPraspberry/output/" pour récu
 - /file_management/delete_zip : Supprime un fichier ZIP d'une date donnée. Efface le répertoire du serveur NGINX mais conserve les données des photos et des tableurs.
 
 - /file_management/list_directories : Affiche tous les dossiers contenant les photos des jours de capture. Ne retourne pas les données du serveur NGINX.
+
+# Informations complémentaires
+- Sans aucune data, les raspberry sont occupés par le firmware a 8.8%, soit ~20Mo
+- Il n'existe pas de route sur l'API pour récuperer la liste des fichiers ZIP, il faut allez sur le serveur nginx.

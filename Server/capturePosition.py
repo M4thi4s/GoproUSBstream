@@ -2,7 +2,7 @@ import os
 import csv
 import serial
 import serial.tools.list_ports
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import time
 import traceback
 import logging
@@ -27,8 +27,12 @@ def convert_gps_time_to_datetime(gps_time):
     minute = int(gps_time[2:4])
     second = int(gps_time[4:6])
     microsecond = int(float(gps_time[6:]) * 1000000)
-    now = datetime.now()
-    return datetime(now.year, now.month, now.day, hour, minute, second, microsecond)
+
+    # Utilisation de datetime.utcnow() pour obtenir la date actuelle en UTC
+    now = datetime.utcnow()
+    
+    # Création d'un objet datetime en UTC
+    return datetime(now.year, now.month, now.day, hour, minute, second, microsecond, tzinfo=timezone.utc)
 
 def parse_gpgga(gpgga_message):
     parts = gpgga_message.split(',')
