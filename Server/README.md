@@ -69,9 +69,6 @@ Voir le fichier Procédure.md
 # License
 
 ## Conditions d'Utilisation
-Libre d'utilisation et de modification : Vous pouvez utiliser et modifier ce code comme vous le souhaitez.
-Obligation de citation : Si vous utilisez ou modifiez ce code, vous devez citer clairement l'auteur original.
-
 ## Responsabilité
 L'auteur n'est pas responsable des conséquences de l'utilisation de ce code.
 
